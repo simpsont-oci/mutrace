@@ -416,6 +416,7 @@ void free(void *p) {
         real_free(p);
 }
 
+void cfree(void *p);
 void cfree(void *p) {
 
         load_functions();

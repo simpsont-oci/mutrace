@@ -60,6 +60,21 @@
 #define LIKELY(x) (__builtin_expect(!!(x),1))
 #define UNLIKELY(x) (__builtin_expect(!!(x),0))
 
+unsigned long one_at_a_time_hash(const unsigned char* key, unsigned long long length);
+unsigned long one_at_a_time_hash(const unsigned char* key, unsigned long long length) {
+  unsigned long long i = 0;
+  unsigned long hash = 0;
+  while (i != length) {
+    hash += key[i++];
+    hash += hash << 10;
+    hash ^= hash >> 6;
+  }
+  hash += hash << 3;
+  hash ^= hash >> 11;
+  hash += hash << 15;
+  return hash;
+}
+
 struct stacktrace_info {
         void **frames;
         int nb_frame;
@@ -586,29 +601,33 @@ static void setup(void) {
 }
 
 static unsigned long mutex_hash(pthread_mutex_t *mutex) {
-        unsigned long u;
+        //unsigned long u;
 
-        u = (unsigned long) mutex;
-        u /= sizeof(void*);
-        return u % hash_size;
+        //u = (unsigned long) mutex;
+        //u /= sizeof(void*);
+
+        //return u % hash_size;
+        return one_at_a_time_hash((unsigned char*)&mutex, sizeof (pthread_mutex_t*)) % hash_size;
 }
 
 static unsigned long rwlock_hash(pthread_rwlock_t *rwlock) {
-        unsigned long u;
+        //unsigned long u;
 
-        u = (unsigned long) rwlock;
-        u /= sizeof(void*);
+        //u = (unsigned long) rwlock;
+        //u /= sizeof(void*);
 
-        return u % hash_size;
+        //return u % hash_size;
+        return one_at_a_time_hash((unsigned char*)&rwlock, sizeof (pthread_rwlock_t*)) % hash_size;
 }
 
 static unsigned long cond_hash(pthread_cond_t *cond) {
-        unsigned long u;
+        //unsigned long u;
 
-        u = (unsigned long) cond;
-        u /= sizeof(void*);
+        //u = (unsigned long) cond;
+        //u /= sizeof(void*);
 
-        return u % hash_size;
+        //return u % hash_size;
+        return one_at_a_time_hash((unsigned char*)&cond, sizeof (pthread_cond_t*)) % hash_size;
 }
 
 static void lock_hash(pthread_mutex_t *lock_array, unsigned u) {
@@ -644,10 +663,15 @@ case TYPE##_ORDER_##UCASE: \
         break;
 #define _ORDER_CASE_AVG(TYPE, UCASE, lcase, divisor) \
 case TYPE##_ORDER_##UCASE: { \
-        double a_avg = a->lcase / a->divisor, \
-               b_avg = b->lcase / b->divisor; \
+        double a_avg = 0.0; \
+        double b_avg = 0.0; \
+        double a_div = a->divisor, b_div = b->divisor; \
+        if (!doubles_equal(a_div, 0.0)) \
+          a_avg = a->lcase / a_div; \
+        if (!doubles_equal(b_div, 0.0)) \
+          b_avg = b->lcase / b_div; \
         if (!doubles_equal(a_avg, b_avg)) \
-                return ((a_avg - b_avg) < 0.0) ? -1 : 1; \
+          return ((a_avg - b_avg) < 0.0) ? -1 : 1; \
         break; \
 }
 #define STATIC_ORDER(lcase) \
@@ -1395,7 +1419,11 @@ static struct mutex_info *mutex_info_acquire(pthread_mutex_t *mutex) {
 
         /* FIXME: We assume that static mutexes are NORMAL, which
          * might not actually be correct */
-        return mutex_info_add(u, mutex, PTHREAD_MUTEX_NORMAL, PTHREAD_PRIO_NONE);
+
+        if (mutex->__data.__kind == 1)
+          return mutex_info_add(u, mutex, PTHREAD_MUTEX_RECURSIVE, PTHREAD_PRIO_NONE);
+        else
+          return mutex_info_add(u, mutex, PTHREAD_MUTEX_NORMAL, PTHREAD_PRIO_NONE);
 }
 
 static void mutex_info_release(pthread_mutex_t *mutex) {
